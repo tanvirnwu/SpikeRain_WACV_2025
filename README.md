@@ -22,6 +22,8 @@ dataset_loader.py          # Training dataset loader
 train.py                   # Training script
 test.py                    # Inference/testing script
 evaluation.py              # PSNR/SSIM/LPIPS evaluation
+inference_utils.py         # Tiled inference (split / merge) shared by test.py and the profiler
+model_complexity.py        # Params / FLOPs / MACs / SOPs / energy / latency profiler
 requirements.txt           # Python dependencies
 ```
 
@@ -89,6 +91,48 @@ Key arguments:
 - `--save_path`: output directory for restored images.
 - `--model_version`: model size variant (`S`, `M`, `L`).
 - `--T`: number of spiking timesteps.
+
+## Complexity, Energy and Latency
+
+`model_complexity.py` measures the efficiency numbers reported in the paper on a
+real checkpoint with real test images: parameter counts from the instantiated
+model, operation counts from forward hooks that see the actual tensor shapes,
+and wall-clock latency with CUDA synchronisation and warm-up.
+
+Whether a convolution is spike-driven (accumulate-only, SOPs) or a dense ANN
+convolution (multiply-accumulate, MACs) is decided by inspecting the values of
+its input tensor at run time, so no hand-maintained layer list can go stale.
+
+```bash
+python model_complexity.py \
+  --data_path ./data/Rain200H/test/input \
+  --model_version M \
+  --weights ./checkpoints/SpikeRain_M/models/<session>/model_best.pth
+```
+
+Or fold it into a normal test run with `--profile`:
+
+```bash
+python test.py \
+  --weights ./checkpoints/SpikeRain_M/models/<session>/model_best.pth \
+  --data_path ./data/Rain200H/test/input \
+  --save_path ./results/Rain200H \
+  --profile
+```
+
+Key arguments (`model_complexity.py`; under `test.py --profile` the first one is
+`--profile_images` and the last is `--complexity_json`):
+- `--num_images`: test images the operation counts are averaged over (default 3).
+- `--profile_size`: fixed resolution for the paper-table forward pass (default 128, `0` disables).
+- `--sign_op_mode`: charge the Sign energy per emitted spike (`spike`, default) or per neuron update (`neuron`).
+- `--json_out`: where to write the JSON report (defaults to `<checkpoint>.complexity.json`).
+
+Energy follows the 45 nm model used by the SNN deraining literature
+(E_MAC = 12.5 pJ, E_SOP = 77 fJ, E_SIGN = 3.7 pJ), reported both under `full`
+accounting (every measured operation) and `conv_only` accounting (convolution /
+linear plus the Sign term), which is the convention of the published comparison
+tables. Any leaf module without an operation counter is listed under
+`unhandled_modules` in the JSON report, so nothing is silently uncounted.
 
 ## Evaluation
 ```bash

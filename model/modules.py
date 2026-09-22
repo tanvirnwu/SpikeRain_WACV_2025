@@ -107,8 +107,12 @@ class UpSampling(nn.Module):
 
     def forward(self, input):
         """Upsample each timestep and apply spiking convolution."""
+        # Allocated on the input's own device/dtype so the block also runs on
+        # CPU (needed by model_complexity.py --gpu_ids -1); behaviour on GPU is
+        # unchanged.
         temp = torch.zeros((input.shape[0], input.shape[1], input.shape[2], input.shape[3] * self.scale_factor,
-                            input.shape[4] * self.scale_factor)).cuda()
+                            input.shape[4] * self.scale_factor),
+                           device=input.device, dtype=input.dtype)
         output = []
         for i in range(input.shape[0]):
             temp[i] = F.interpolate(input[i], scale_factor=self.scale_factor, mode='bilinear')

@@ -25,6 +25,18 @@ parser.add_argument('--eval_workers', type=int, default=4)
 parser.add_argument('--crop_size', type=int, default=80)
 parser.add_argument('--overlap_size', type=int, default=8)
 parser.add_argument('--weights', type=str, default="/home/tanvir/projects/img_restoration/SpikeRain/checkpoints/SpikeRain_M/models/dense_attn_bs12_lr_1e_3/model_best.pth")
+# --- efficiency profiling (model_complexity.py); off by default ---
+parser.add_argument('--profile', action='store_true',
+                    help='After restoration, measure params / FLOPs / MACs / SOPs / '
+                         'energy / latency with model_complexity.py')
+parser.add_argument('--profile_images', type=int, default=3,
+                    help='Test images the operation counts are averaged over')
+parser.add_argument('--profile_size', type=int, default=128,
+                    help='Fixed resolution for the paper-table forward pass (0 disables)')
+parser.add_argument('--sign_op_mode', type=str, default='spike', choices=['spike', 'neuron'],
+                    help="Charge the Sign energy per emitted spike or per neuron update")
+parser.add_argument('--complexity_json', type=str, default=None,
+                    help='Where to write the JSON report (default: <save_path>/complexity.json)')
 opt = parser.parse_args()
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -183,3 +195,25 @@ if __name__ == '__main__':
                 cleanname = fname
                 save_file = os.path.join(result_dir, cleanname)
                 save_img(save_file, img_as_ubyte(restored[j]))
+
+    if opt.profile:
+        from model_complexity import (profile_efficiency, print_efficiency_summary,
+                                      save_efficiency_report)
+
+        print("\n===> Profiling parameters, operations, energy and latency ...")
+        report = profile_efficiency(
+            model_restoration,
+            image_paths=sorted(eval_loader.dataset.imgs),
+            crop_size=opt.crop_size,
+            overlap_size=opt.overlap_size,
+            device=next(model_restoration.parameters()).device,
+            num_images=opt.profile_images,
+            profile_size=opt.profile_size or None,
+            sign_op_mode=opt.sign_op_mode,
+            reset_fn=functional.reset_net,
+            model_config={'model_version': opt.model_version.upper(), 'T': opt.T},
+            checkpoint=opt.weights,
+        )
+        print_efficiency_summary(report)
+        destination = opt.complexity_json or os.path.join(result_dir, 'complexity.json')
+        print('===> Saved complexity report:', save_efficiency_report(report, destination))
